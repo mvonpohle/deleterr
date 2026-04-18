@@ -530,6 +530,10 @@ class Exclusions(BaseModel):
         default=None,
         description="Seerr/Overseerr request-based exclusions",
     )
+    plex_watchlist: bool = Field(
+        default=False,
+        description="Exclude media that is on the Plex server owner's watchlist from deletion",
+    )
 
 
 class LibraryConfig(BaseModel):

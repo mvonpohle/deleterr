@@ -1093,3 +1093,196 @@ class TestTitleAndYearMatch:
         plex_item = MockPlexMediaItem(title="Some Movie", year=2020)
         history = {"title": "Some Movie", "year": None}
         assert title_and_year_match(plex_item, history) is False
+
+
+class TestCheckExcludedPlexWatchlist:
+    """Test Plex watchlist exclusion logic."""
+
+    def _make_plex_item(self, title="The Matrix", year=1999):
+        return MockPlexMediaItem(title=title, year=year)
+
+    def test_watchlist_disabled_returns_true(self):
+        """When plex_watchlist is False, media is always actionable."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "The Matrix", "tmdbId": 603}
+        plex_item = self._make_plex_item()
+        exclude = {"plex_watchlist": False}
+        watchlist_guids = {"tmdb://603"}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, watchlist_guids) is True
+
+    def test_watchlist_not_configured_returns_true(self):
+        """When plex_watchlist key is absent, media is actionable."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "The Matrix", "tmdbId": 603}
+        plex_item = self._make_plex_item()
+        exclude = {}
+        watchlist_guids = {"tmdb://603"}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, watchlist_guids) is True
+
+    def test_empty_watchlist_returns_true(self):
+        """When watchlist is empty, nothing is excluded."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "The Matrix", "tmdbId": 603}
+        plex_item = self._make_plex_item()
+        exclude = {"plex_watchlist": True}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, set()) is True
+
+    def test_tmdb_match_excludes_movie(self):
+        """Movie with matching TMDB ID in watchlist is excluded."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "The Matrix", "tmdbId": 603}
+        plex_item = self._make_plex_item()
+        exclude = {"plex_watchlist": True}
+        watchlist_guids = {"tmdb://603", "tmdb://999"}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, watchlist_guids) is False
+
+    def test_tvdb_match_excludes_show(self):
+        """TV show with matching TVDB ID in watchlist is excluded."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "Breaking Bad", "tvdbId": 81189}
+        plex_item = self._make_plex_item(title="Breaking Bad", year=2008)
+        exclude = {"plex_watchlist": True}
+        watchlist_guids = {"tvdb://81189"}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, watchlist_guids) is False
+
+    def test_imdb_match_excludes_movie(self):
+        """Movie with matching IMDB ID in watchlist is excluded."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "The Matrix", "imdbId": "tt0133093"}
+        plex_item = self._make_plex_item()
+        exclude = {"plex_watchlist": True}
+        watchlist_guids = {"imdb://tt0133093"}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, watchlist_guids) is False
+
+    def test_no_id_match_returns_true(self):
+        """Media not in watchlist is actionable."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "Unknown Movie", "tmdbId": 12345, "tvdbId": 67890, "imdbId": "tt9999999"}
+        plex_item = self._make_plex_item(title="Unknown Movie", year=2020)
+        exclude = {"plex_watchlist": True}
+        watchlist_guids = {"tmdb://603", "tvdb://81189", "imdb://tt0133093"}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, watchlist_guids) is True
+
+    def test_media_without_ids_returns_true(self):
+        """Media with no IDs is not excluded (cannot match watchlist)."""
+        from app.media_cleaner import check_excluded_plex_watchlist
+
+        media_data = {"title": "Some Movie"}
+        plex_item = self._make_plex_item(title="Some Movie", year=2020)
+        exclude = {"plex_watchlist": True}
+        watchlist_guids = {"tmdb://603", "tvdb://81189"}
+
+        assert check_excluded_plex_watchlist(media_data, plex_item, exclude, watchlist_guids) is True
+
+
+class TestGetPlexWatchlistGuids:
+    """Test _get_plex_watchlist_guids caching on MediaCleaner."""
+
+    @pytest.fixture
+    def media_cleaner(self):
+        from unittest.mock import MagicMock, patch
+        from app.media_cleaner import MediaCleaner
+
+        config = MagicMock()
+        config.settings = {
+            "plex": {"url": "http://localhost:32400", "token": "test"},
+        }
+        with patch("app.media_cleaner.PlexServer"):
+            with patch("app.media_cleaner.create_watch_provider"):
+                mc = MediaCleaner(config)
+        return mc
+
+    def test_returns_empty_set_without_media_server(self, media_cleaner):
+        """Without media_server, watchlist guids is empty set."""
+        media_cleaner.media_server = None
+        result = media_cleaner._get_plex_watchlist_guids()
+        assert result == set()
+
+    def test_fetches_guids_from_media_server(self, media_cleaner):
+        """Calls media_server.get_user_watchlist() and returns set."""
+        mock_server = MagicMock()
+        mock_server.get_user_watchlist.return_value = ["tmdb://603", "tvdb://81189"]
+        media_cleaner.media_server = mock_server
+
+        result = media_cleaner._get_plex_watchlist_guids()
+
+        assert result == {"tmdb://603", "tvdb://81189"}
+        mock_server.get_user_watchlist.assert_called_once()
+
+    def test_caches_result_on_second_call(self, media_cleaner):
+        """Second call uses cached value without re-fetching."""
+        mock_server = MagicMock()
+        mock_server.get_user_watchlist.return_value = ["tmdb://603"]
+        media_cleaner.media_server = mock_server
+
+        media_cleaner._get_plex_watchlist_guids()
+        media_cleaner._get_plex_watchlist_guids()
+
+        mock_server.get_user_watchlist.assert_called_once()
+
+
+class TestPlexMediaServerGetUserWatchlist:
+    """Test PlexMediaServer.get_user_watchlist()."""
+
+    @pytest.fixture
+    def plex_server(self):
+        from unittest.mock import MagicMock, patch
+        from app.modules.plex import PlexMediaServer
+
+        with patch("app.modules.plex.PlexServer") as mock_plex:
+            server = PlexMediaServer("http://localhost:32400", "test-token")
+            yield server, mock_plex.return_value
+
+    def test_returns_guids_from_watchlist(self, plex_server):
+        """Returns list of GUID strings from watchlist items."""
+        plex, mock_raw_server = plex_server
+
+        mock_account = MagicMock()
+        mock_raw_server.myPlexAccount.return_value = mock_account
+
+        item1 = MagicMock()
+        item1.guids = [MagicMock(id="tmdb://603"), MagicMock(id="imdb://tt0133093")]
+        item2 = MagicMock()
+        item2.guids = [MagicMock(id="tvdb://81189")]
+        mock_account.watchlist.return_value = [item1, item2]
+
+        result = plex.get_user_watchlist()
+
+        assert "tmdb://603" in result
+        assert "imdb://tt0133093" in result
+        assert "tvdb://81189" in result
+
+    def test_returns_empty_list_on_exception(self, plex_server):
+        """Returns empty list when Plex API call fails."""
+        plex, mock_raw_server = plex_server
+        mock_raw_server.myPlexAccount.side_effect = Exception("Connection refused")
+
+        result = plex.get_user_watchlist()
+
+        assert result == []
+
+    def test_empty_watchlist_returns_empty_list(self, plex_server):
+        """Returns empty list when watchlist is empty."""
+        plex, mock_raw_server = plex_server
+
+        mock_account = MagicMock()
+        mock_raw_server.myPlexAccount.return_value = mock_account
+        mock_account.watchlist.return_value = []
+
+        result = plex.get_user_watchlist()
+
+        assert result == []

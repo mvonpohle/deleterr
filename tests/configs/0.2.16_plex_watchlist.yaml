@@ -1,0 +1,36 @@
+# Config file for testing backward compatibility with plex_watchlist exclusion (Issue #60)
+# Validates that plex_watchlist: true is accepted in the Exclusions schema
+
+plex:
+  url: "http://localhost:32400"
+  token: "YOUR_PLEX_TOKEN"
+
+radarr:
+  - name: "Radarr"
+    url: "http://localhost:7878"
+    api_key: "YOUR_RADARR_API_KEY"
+
+sonarr:
+  - name: "Sonarr"
+    url: "http://localhost:8989"
+    api_key: "YOUR_SONARR_API_KEY"
+
+dry_run: true
+
+libraries:
+  - name: "Movies"
+    radarr: "Radarr"
+    action_mode: "delete"
+    last_watched_threshold: 30
+    max_actions_per_run: 10
+    exclude:
+      plex_watchlist: true
+
+  - name: "TV Shows"
+    sonarr: "Sonarr"
+    action_mode: "delete"
+    last_watched_threshold: 365
+    max_actions_per_run: 10
+    series_type: standard
+    exclude:
+      plex_watchlist: true
