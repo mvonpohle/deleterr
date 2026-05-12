@@ -532,7 +532,7 @@ class Exclusions(BaseModel):
     )
     plex_watchlist: bool = Field(
         default=False,
-        description="Exclude media that is on the Plex server owner's watchlist from deletion",
+        description="True to exclude media that is on the Plex server owner's watchlist from deletion",
     )
 
 
