@@ -261,6 +261,30 @@ class PlexMediaServer(BaseMediaServer):
 
         return None
 
+    def get_user_watchlist(self, username: Optional[str] = None) -> list[str]:
+        """Get GUIDs of items on a user's Plex watchlist.
+
+        Args:
+            username: Plex username. If None, returns the server owner's watchlist.
+
+        Returns:
+            List of GUID strings (e.g., ["tmdb://12345", "tvdb://67890"]).
+        """
+        try:
+            account = self.server.myPlexAccount()
+            watchlist = account.watchlist()
+            guids = []
+            for item in watchlist:
+                try:
+                    for guid in item.guids:
+                        guids.append(guid.id)
+                except Exception:
+                    pass
+            return guids
+        except Exception as e:
+            logger.warning(f"Could not fetch Plex watchlist: {e}")
+            return []
+
     def get_guids(self, item: Any) -> dict:
         """Extract GUIDs from a Plex media item.
 

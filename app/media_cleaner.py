@@ -385,6 +385,7 @@ class MediaCleaner:
 
         self.watched_collections = set()
         self._justwatch_instances = {}  # Cache for JustWatch instances per country
+        self._plex_watchlist_guids = None  # Lazy-loaded cache for Plex watchlist GUIDs
 
         # Setup connections
         # SSL verification is disabled by default for self-signed certificates
@@ -429,6 +430,17 @@ class MediaCleaner:
             timeout=120,
             session=session,
         )
+
+    def _get_plex_watchlist_guids(self) -> set:
+        """Fetch and cache the Plex server owner's watchlist as a set of GUIDs."""
+        if self._plex_watchlist_guids is None:
+            if self.media_server:
+                guids = self.media_server.get_user_watchlist()
+                self._plex_watchlist_guids = set(guids)
+                logger.debug(f"Loaded {len(self._plex_watchlist_guids)} Plex watchlist GUIDs")
+            else:
+                self._plex_watchlist_guids = set()
+        return self._plex_watchlist_guids
 
     def get_justwatch_instance(self, library):
         """
@@ -1551,6 +1563,13 @@ class MediaCleaner:
         ):
             return False
 
+        # Plex watchlist exclusion (only fetch watchlist if configured)
+        if exclude.get("plex_watchlist"):
+            if not check_excluded_plex_watchlist(
+                media_data, plex_media_item, exclude, self._get_plex_watchlist_guids()
+            ):
+                return False
+
         return True
 
 
@@ -2058,6 +2077,38 @@ def check_excluded_seerr_requester_watch(
         f"'{media_data.get('title')}' watched by requester '{tautulli_user}', allowing normal rules"
     )
     return True  # Allow: requester has watched
+
+
+def check_excluded_plex_watchlist(media_data, plex_media_item, exclude, watchlist_guids):
+    """
+    Check if media should be excluded because it is on the Plex watchlist.
+
+    Args:
+        media_data: Media data from Sonarr/Radarr
+        plex_media_item: Plex media item
+        exclude: Exclusion configuration from library
+        watchlist_guids: Set of GUID strings from the Plex watchlist
+
+    Returns:
+        True if media should NOT be excluded (i.e., is actionable)
+        False if media should be excluded (i.e., skip this media)
+    """
+    if not exclude.get("plex_watchlist") or not watchlist_guids:
+        return True
+
+    if media_data.get("tmdbId") and f"tmdb://{media_data['tmdbId']}" in watchlist_guids:
+        logger.debug(f"{media_data['title']} is on Plex watchlist (TMDB:{media_data['tmdbId']}), skipping")
+        return False
+
+    if media_data.get("tvdbId") and f"tvdb://{media_data['tvdbId']}" in watchlist_guids:
+        logger.debug(f"{media_data['title']} is on Plex watchlist (TVDB:{media_data['tvdbId']}), skipping")
+        return False
+
+    if media_data.get("imdbId") and f"imdb://{media_data['imdbId']}" in watchlist_guids:
+        logger.debug(f"{media_data['title']} is on Plex watchlist (IMDB:{media_data['imdbId']}), skipping")
+        return False
+
+    return True
 
 
 def find_watched_data(plex_media_item, activity_data):
